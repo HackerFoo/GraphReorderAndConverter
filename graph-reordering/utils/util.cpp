@@ -1,5 +1,10 @@
 #include "util.hpp"
 
+#include <numeric>
+#include <algorithm>
+#include <capnp/message.h>
+#include <capnp/serialize.h>
+
 void quit()
 {
     system("pause");
@@ -121,4 +126,85 @@ bool edge_idpair_cmp(const Edge& a, const Edge& b)
 {
     if(a.first == b.first) return a.second < b.second;
     else return a.first < b.first;
+}
+
+EdgeVector load_rr_graph(const ucap::RrGraph::Reader &rr_graph) {
+  EdgeVector edges;
+  auto rr_edges = rr_graph.getRrEdges().getEdges();
+  edges.reserve(rr_edges.size());
+
+  for(auto e : rr_edges) {
+    int u = e.getSrcNode();
+    int v = e.getSinkNode();
+    if (u != v) {
+        edges.push_back(std::make_pair(u, v));
+    }
+  }
+  return edges;
+}
+
+void save_rr_graph(const std::vector<int> &order,
+                   const ucap::RrGraph::Reader &in,
+                   ucap::RrGraph::Builder &out) {
+
+  int i;
+  out.setToolComment(in.getToolComment());
+  out.setToolName(in.getToolName());
+  out.setToolVersion(in.getToolVersion());
+  out.setChannels(in.getChannels());
+  out.setSwitches(in.getSwitches());
+  out.setSegments(in.getSegments());
+  out.setBlockTypes(in.getBlockTypes());
+  out.setConnectionBoxes(in.getConnectionBoxes());
+  out.setGrid(in.getGrid());
+
+  // find where nodes will go and store them
+  auto nodesIn = in.getRrNodes().getNodes();
+  auto nodesOut = out.getRrNodes().initNodes(nodesIn.size());
+  std::vector<bool> written_nodes(nodesIn.size(), false);
+  for(i = 0; i < nodesIn.size(); i++) {
+    int u = order[i];
+    assert(!written_nodes[u]);
+    nodesOut.setWithCaveats(u, nodesIn[i]);
+    nodesOut[u].setId(u);
+    written_nodes[u] = true;
+  }
+
+  // check the order
+  i = 0;
+  for(auto nodeOut : nodesOut) {
+    assert(i == nodeOut.getId());
+    i++;
+  }
+
+  for(auto w : written_nodes) assert(w);
+
+  // sort the edges by src then sink
+  auto edgesIn = in.getRrEdges().getEdges();
+  std::vector<int> edge_list(edgesIn.size());
+  std::iota(std::begin(edge_list), std::end(edge_list), 0);
+  std::sort(edge_list.begin(), edge_list.end(),
+            [&](int ai, int bi) {
+              const auto &a = edgesIn[ai];
+              const auto &b = edgesIn[bi];
+              return order[a.getSrcNode()] < order[b.getSrcNode()] ||
+                                         (order[a.getSrcNode()] == order[b.getSrcNode()] &&
+                                          order[a.getSinkNode()] < order[b.getSinkNode()]);
+            });
+
+  // store them
+  i = 0;
+  std::vector<bool> written_edges(edgesIn.size(), false);
+  auto edgesOut = out.getRrEdges().initEdges(edgesIn.size());
+  for(auto e : edge_list) {
+    const auto &edgeIn = edgesIn[e];
+    assert(!written_edges[e]);
+    edgesOut.setWithCaveats(i, edgeIn);
+    edgesOut[i].setSinkNode(order[edgeIn.getSinkNode()]);
+    edgesOut[i].setSrcNode(order[edgeIn.getSrcNode()]);
+    written_edges[e] = true;
+    i++;
+  }
+
+  for(auto w : written_edges) assert(w);
 }

@@ -41,6 +41,7 @@ include_directories(.)
 #find_package(ParMETIS)
 find_package(METIS)
 find_package(Threads)
+find_package(CapnProto CONFIG REQUIRED)
 
 if (AVX2_FOUND)
     add_compile_options(-g -O3 -Wall -Wno-unused-result -march=core-avx2 -lmetis -pthread)
@@ -55,10 +56,14 @@ set(UTIL_FILES utils/util.cpp utils/util.hpp)
 
 ##### 1) GRO : graph reordering optimization
 if (METIS_FOUND)
+    capnp_generate_cpp(CAPNP_SRCS CAPNP_HDRS
+      utils/rr_graph_uxsdcxx.capnp
+      )
     add_executable(reorder ${DATA_STRUCTURE_FILES}
             reordering/porder.cpp reordering/porder.hpp reordering/reorder.cpp
-            utils/util.cpp)
-    target_link_libraries(reorder ${METIS_LIBRARIES})
+            utils/util.cpp ${CAPNP_SRCS})
+    target_link_libraries(reorder ${METIS_LIBRARIES} CapnProto::capnp)
+    target_include_directories(reorder PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif ()
 
 add_subdirectory(reordering/other-reorderings)

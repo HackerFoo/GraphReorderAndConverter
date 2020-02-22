@@ -14,6 +14,7 @@
 #include <x86intrin.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include "utils/rr_graph_uxsdcxx.capnp.h"
 
 
 #define SIMD_STATE 4 // 0:none, 2:scalar2x, 4:simd4x
@@ -70,4 +71,11 @@ void save_graph(const std::string path, const EdgeVector& edge_vec);
 std::vector<int> load_vertex_order(const std::string path);
 void save_newid(const std::string path, std::vector<int> org2newid);
 bool edge_idpair_cmp(const Edge& a, const Edge& b);
+
+// RRGraph
+EdgeVector load_rr_graph(const ucap::RrGraph::Reader &rr_graph);
+void save_rr_graph(const std::vector<int> &order,
+                   const ucap::RrGraph::Reader &in,
+                   ucap::RrGraph::Builder &out);
+
 #endif

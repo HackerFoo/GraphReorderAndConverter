@@ -1,5 +1,11 @@
 #include "porder.hpp"
 #include "utils/util.hpp"
+#include <capnp/message.h>
+#include <capnp/serialize.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 POrder porder;
 
@@ -13,8 +19,6 @@ int main(int argc, char* argv[])
     std::string graph_file_path(argv[1]);
     std::string graph_name = extract_filename(graph_file_path);
     std::string order_option = "gro";
-    std::string reordered_graph_file_path = graph_name + "_GRO.txt";
-    std::string reordered_newid_file_path = graph_name + "_GRO_newID.txt";
     int i;
     if ((i = arg_pos((char *)"-order", argc, argv)) > 0)
         order_option = std::string(argv[i + 1]);
@@ -29,7 +33,17 @@ int main(int argc, char* argv[])
     struct timeval time_end;
 
     gettimeofday(&time_start, NULL);
-    EdgeVector edge_vec = load_graph(graph_file_path);
+    int fd_in = open(graph_file_path.c_str(), O_RDONLY);
+    if (fd_in < 0) {
+        std::cout << "Failed to open " << graph_file_path << std::endl;
+        quit();
+    }
+
+    ::capnp::ReaderOptions opts = ::capnp::ReaderOptions();
+    opts.traversalLimitInWords = 1ul << 30;
+    ::capnp::StreamFdMessageReader messageIn(fd_in, opts);
+    auto rrIn = messageIn.getRoot<ucap::RrGraph>();
+    EdgeVector edge_vec = load_rr_graph(rrIn);
     gettimeofday(&time_end, NULL);
     double read_time = (time_end.tv_sec - time_start.tv_sec) * 1000.0 + (time_end.tv_usec - time_start.tv_usec) / 1000.0;
     printf("read_time=%.3fms\n", read_time);
@@ -45,34 +59,28 @@ int main(int argc, char* argv[])
     EdgeVector new_edge_vec;
     gettimeofday(&time_start, NULL);
 
+    std::string suffix = "GRO";
     if (order_option == "hybrid") {
-        reordered_graph_file_path = graph_name + "_Horder.txt";
-        reordered_newid_file_path = graph_name + "_Horder_newID.txt";
+        suffix = "Horder";
         new_edge_vec = porder.hybrid_bfsdeg();
     } else if (order_option == "mloggapa") {
-        reordered_graph_file_path = graph_name + "_MLOGGAPAorder.txt";
-        reordered_newid_file_path = graph_name + "_MLOGGAPAorder_newID.txt";
+        suffix = "MLOGGAPAorder";
         new_edge_vec = porder.mloggapa_order();       
     } else if (order_option == "metis") {
-        reordered_graph_file_path = graph_name + "_METISorder.txt";
-        reordered_newid_file_path = graph_name + "_METIS_newID.txt";
+        suffix = "METISorder";
         new_edge_vec = porder.metis_order();
     } else if (order_option == "slashburn") {
-        reordered_graph_file_path = graph_name + "_SBorder.txt";
-        reordered_newid_file_path = graph_name + "_SB_newID.txt";
+        suffix = "SBorder";
         new_edge_vec = porder.slashburn_order();        
     } else if (order_option == "bfsr") {
-        reordered_graph_file_path = graph_name + "_BFSRorder.txt";
-        reordered_newid_file_path = graph_name + "_BFSR_newID.txt";
+        suffix = "BFSRorder";
         new_edge_vec = porder.bfsr_order();        
     } else if (order_option == "dfs") {
-        reordered_graph_file_path = graph_name + "_DFSorder.txt";
-        reordered_newid_file_path = graph_name + "_DFS_newID.txt";
+        suffix = "DFSorder";
         new_edge_vec = porder.dfs_order();        
     } else {
         order_option = "gro";
-        reordered_graph_file_path = graph_name + "_GRO.txt";
-        reordered_newid_file_path = graph_name + "_GRO_newID.txt";
+        suffix = "GRO";
         new_edge_vec = porder.greedy_mheap(); 
     }
 
@@ -85,8 +93,17 @@ int main(int argc, char* argv[])
     porder.comp_ratio();
 
     gettimeofday(&time_start, NULL);
-    save_graph(reordered_graph_file_path, new_edge_vec);
-    save_newid(reordered_newid_file_path, porder.org2newid);
+    std::string output_filename = graph_name + "." + suffix + ".bin";
+    int fd_out = open(output_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd_out < 0) {
+        std::cout << "Fail to open " << output_filename << std::endl;
+        quit();
+    }
+
+    ::capnp::MallocMessageBuilder messageOut;
+    auto rrOut = messageOut.initRoot<ucap::RrGraph>();
+    save_rr_graph(porder.org2newid, rrIn, rrOut);
+    writeMessageToFd(fd_out, messageOut);
     gettimeofday(&time_end, NULL);
     double write_time = (time_end.tv_sec - time_start.tv_sec) * 1000.0 + (time_end.tv_usec - time_start.tv_usec) / 1000.0;
     printf("write_time=%.3fms\n", write_time);
